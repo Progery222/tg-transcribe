@@ -1,0 +1,15 @@
+services:
+  bot:
+    image: ghcr.io/progery222/tg-transcribe:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - bot_data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bot_data:

@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+
+# Deploy artifacts
+deploy_key
+deploy_key.pub
+*.pem
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Database
+data/*.sqlite3
+data/*.sqlite3-*
+
+# Test/lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
