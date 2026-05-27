@@ -11,7 +11,7 @@ _STRINGS: dict[str, str] = {
         "/subscribers — список активных подписчиков\n"
         "/chats — группы, в которых работает бот\n"
         "/digest_now — собрать сводку прямо сейчас\n"
-        "/model — выбрать модель распознавания (в группе)\n"
+        "/model — выбрать модель распознавания\n"
         "/enable, /disable — переключить мониторинг группы\n"
     ),
     "start_subscriber": (
@@ -36,7 +36,7 @@ _STRINGS: dict[str, str] = {
         "/subscribers\n"
         "/chats\n"
         "/digest_now\n"
-        "/model, /enable, /disable — в группе с ботом"
+        "/model, /enable, /disable — здесь или в группе"
     ),
     # Transcript fanout (DM to subscribers)
     "transcript_dm": "🎙 <b>[{group_title}]</b> {speaker} · {time_msk}\n«{text}»",
@@ -70,12 +70,18 @@ _STRINGS: dict[str, str] = {
     "invite_invalid_or_expired": "Эта ссылка недействительна или уже использована.",
     # Model picker (super-admin only now)
     "model_picker_title": "Выберите модель для этого чата:",
+    "model_picker_title_named": "Выберите модель для <b>{chat}</b>:",
     "model_picker_cancel": "Отмена",
     "model_set": "Модель установлена: <b>{label}</b>",
+    "model_set_named": "Модель установлена для <b>{chat}</b>: <b>{label}</b>",
     "model_cancelled": "Отменено.",
+    # Group picker (DM)
+    "groups_picker_title": "Выберите группу ({action}):",
     # Group monitoring toggle
     "enabled": "Мониторинг этой группы включён.",
     "disabled": "Мониторинг этой группы выключен.",
+    "enabled_named": "Мониторинг <b>{chat}</b> включён.",
+    "disabled_named": "Мониторинг <b>{chat}</b> выключен.",
     # Daily digest
     "digest_caption": "Сводка: {group} · {date}",
     "digest_header": "Группа: {group}\nПериод: {start} — {end} ({tz})",
