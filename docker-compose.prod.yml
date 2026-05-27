@@ -1,10 +1,29 @@
 services:
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_LOCAL: 1
+      TELEGRAM_STAT: 0
+      TELEGRAM_VERBOSITY: 1
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    profiles: ["big-files"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   bot:
     image: ghcr.io/progery222/tg-transcribe:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: .env
     volumes:
       - bot_data:/app/data
+      - telegram_bot_api_data:/var/lib/telegram-bot-api:ro
     logging:
       driver: json-file
       options:
@@ -13,3 +32,4 @@ services:
 
 volumes:
   bot_data:
+  telegram_bot_api_data:

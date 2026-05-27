@@ -1,6 +1,8 @@
 import structlog
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -45,8 +47,15 @@ async def run() -> None:
     transcribers = _build_transcribers()
     log.info("transcribers_loaded", providers=list(transcribers.keys()))
 
+    session: AiohttpSession | None = None
+    if settings.TELEGRAM_BOT_API_URL:
+        api_server = TelegramAPIServer.from_base(settings.TELEGRAM_BOT_API_URL, is_local=True)
+        session = AiohttpSession(api=api_server)
+        log.info("bot_api_local_mode", url=settings.TELEGRAM_BOT_API_URL)
+
     bot = Bot(
         token=settings.BOT_TOKEN,
+        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 

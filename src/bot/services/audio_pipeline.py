@@ -14,14 +14,14 @@ class FfmpegError(RuntimeError):
 
 @dataclass(frozen=True)
 class AudioPayload:
-    """Bytes ready to send to a transcriber."""
+    """Audio normalized to Opus 16k mono OGG, ready for transcribers."""
 
-    data: bytes
+    path: Path
     mime: str
     filename: str
 
 
-FFMPEG_TIMEOUT_SECONDS = 30.0
+FFMPEG_TIMEOUT_SECONDS = 600.0
 
 
 async def _run_ffmpeg(args: list[str]) -> None:
@@ -43,49 +43,50 @@ async def _run_ffmpeg(args: list[str]) -> None:
         )
 
 
-async def extract_audio_from_mp4(mp4_bytes: bytes) -> bytes:
-    """Extract audio from MP4 to m4a (AAC) via temp files.
+async def normalize_to_opus(src_path: Path, *, work_dir: Path | None = None) -> Path:
+    """Re-encode any media to Opus 16 kbps mono OGG.
 
-    Why temp files: MP4 input needs a seekable source (moov atom may sit at the end),
-    and the ipod/m4a output muxer requires a seekable destination. Double-pipe gives
-    truncated/corrupted streams that OpenAI rejects with 400 'unsupported'. Local
-    files cost ~10 ms more and are bulletproof.
+    Output is small (~7 MB per hour of speech) — fits OpenAI's 25 MB and Gemini's 20 MB
+    inline limits with room to spare for most realistic recordings. For very long
+    inputs callers should still run :func:`audio_chunker.split_if_needed`.
     """
-    with tempfile.TemporaryDirectory() as td:
-        in_path = Path(td) / "in.mp4"
-        out_path = Path(td) / "out.m4a"
-        in_path.write_bytes(mp4_bytes)
-        await _run_ffmpeg(
-            [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-y",
-                "-i",
-                str(in_path),
-                "-vn",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "64k",
-                str(out_path),
-            ]
-        )
-        return out_path.read_bytes()
+    if work_dir is None:
+        work_dir = Path(tempfile.mkdtemp(prefix="tg-tx-"))
+    work_dir.mkdir(parents=True, exist_ok=True)
+    out_path = work_dir / "audio.ogg"
+    await _run_ffmpeg(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(src_path),
+            "-vn",
+            "-ac",
+            "1",
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "16k",
+            "-application",
+            "voip",
+            str(out_path),
+        ]
+    )
+    return out_path
 
 
-async def prepare_payload(content_type: str, raw: bytes, mime: str | None) -> AudioPayload:
-    """Convert downloaded Telegram media into a payload ready for transcribers.
-
-    - voice (OGG/Opus) and audio (anything) → forward as-is.
-    - video_note / video → ffmpeg-extract audio track to m4a.
-    """
-    if content_type == "voice":
-        return AudioPayload(data=raw, mime=mime or "audio/ogg", filename="voice.ogg")
-    if content_type == "audio":
-        return AudioPayload(data=raw, mime=mime or "audio/mpeg", filename="audio.bin")
-    if content_type in ("video_note", "video"):
-        audio = await extract_audio_from_mp4(raw)
-        return AudioPayload(data=audio, mime="audio/mp4", filename=f"{content_type}.m4a")
-    raise ValueError(f"unsupported content type: {content_type}")
+async def prepare_payload(
+    content_type: str,
+    src_path: Path,
+    src_mime: str | None,
+    *,
+    work_dir: Path | None = None,
+) -> AudioPayload:
+    """Convert any downloaded Telegram media into a uniform Opus payload."""
+    if content_type not in ("voice", "audio", "video_note", "video"):
+        raise ValueError(f"unsupported content type: {content_type}")
+    out_path = await normalize_to_opus(src_path, work_dir=work_dir)
+    return AudioPayload(path=out_path, mime="audio/ogg", filename=f"{content_type}.ogg")

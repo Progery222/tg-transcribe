@@ -1,5 +1,5 @@
 import time
-from io import BytesIO
+from pathlib import Path
 
 import structlog
 from openai import (
@@ -35,7 +35,7 @@ class OpenAITranscriber:
 
     async def transcribe(
         self,
-        audio_bytes: bytes,
+        audio_path: Path,
         mime: str,
         filename: str,
         *,
@@ -45,15 +45,16 @@ class OpenAITranscriber:
         started = time.monotonic()
 
         async def _call() -> TranscriptionResult:
-            kwargs: dict[str, object] = {
-                "model": model,
-                "file": (filename, BytesIO(audio_bytes), mime),
-                "response_format": "json",
-            }
-            if language:
-                kwargs["language"] = language
             try:
-                resp = await self._client.audio.transcriptions.create(**kwargs)
+                with audio_path.open("rb") as fh:
+                    kwargs: dict[str, object] = {
+                        "model": model,
+                        "file": (filename, fh, mime),
+                        "response_format": "json",
+                    }
+                    if language:
+                        kwargs["language"] = language
+                    resp = await self._client.audio.transcriptions.create(**kwargs)
             except (APIConnectionError, APITimeoutError, RateLimitError) as e:
                 raise TranscriptionTransientError(str(e)) from e
             except BadRequestError as e:

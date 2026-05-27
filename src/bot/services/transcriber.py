@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 
@@ -29,7 +30,7 @@ class Transcriber(Protocol):
 
     async def transcribe(
         self,
-        audio_bytes: bytes,
+        audio_path: Path,
         mime: str,
         filename: str,
         *,

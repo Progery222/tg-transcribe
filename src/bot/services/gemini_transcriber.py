@@ -1,5 +1,7 @@
+import asyncio
 import base64
 import time
+from pathlib import Path
 
 import httpx
 import structlog
@@ -35,7 +37,7 @@ class GeminiTranscriber:
 
     async def transcribe(
         self,
-        audio_bytes: bytes,
+        audio_path: Path,
         mime: str,
         filename: str,
         *,
@@ -48,6 +50,7 @@ class GeminiTranscriber:
         prompt = _PROMPT
         if language:
             prompt += f" The spoken language is {language}."
+        raw = await asyncio.to_thread(audio_path.read_bytes)
         body = {
             "contents": [
                 {
@@ -55,7 +58,7 @@ class GeminiTranscriber:
                         {
                             "inline_data": {
                                 "mime_type": mime,
-                                "data": base64.b64encode(audio_bytes).decode("ascii"),
+                                "data": base64.b64encode(raw).decode("ascii"),
                             }
                         },
                         {"text": prompt},

@@ -29,7 +29,17 @@ class Settings(BaseSettings):
 
     # Concurrency / limits
     MAX_CONCURRENT_TRANSCRIPTIONS: int = 3
-    MAX_FILE_BYTES: int = 20 * 1024 * 1024  # Telegram Bot API getFile cap
+    MAX_FILE_BYTES: int = 500 * 1024 * 1024  # 500 MB with self-hosted Bot API
+
+    # v4 — self-hosted Telegram Bot API (для файлов >20 МБ).
+    # Если TELEGRAM_BOT_API_URL пустой — работаем через api.telegram.org (потолок 20 МБ).
+    TELEGRAM_BOT_API_URL: str = ""
+    TELEGRAM_API_ID: str = ""
+    TELEGRAM_API_HASH: str = ""
+    # Путь, по которому файлы доступны изнутри bot-контейнера (mount shared volume RO).
+    # Local mode getFile возвращает абсолютный путь от имени bot-api сервиса; если
+    # значение задано, бот подменит префикс на этот путь.
+    TELEGRAM_BOT_API_LOCAL_ROOT: str = ""
 
     # v2: access control + DM fanout + daily digest
     BOT_ADMIN_IDS: str = ""  # comma-separated Telegram user IDs
@@ -52,6 +62,11 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_API_KEY is required when DEFAULT_PROVIDER=openai")
         if self.DEFAULT_PROVIDER == "gemini" and not self.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is required when DEFAULT_PROVIDER=gemini")
+        if self.TELEGRAM_BOT_API_URL and not (self.TELEGRAM_API_ID and self.TELEGRAM_API_HASH):
+            raise ValueError(
+                "TELEGRAM_API_ID and TELEGRAM_API_HASH are required when "
+                "TELEGRAM_BOT_API_URL is set"
+            )
         return self
 
     @property

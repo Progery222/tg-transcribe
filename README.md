@@ -29,6 +29,38 @@ docker compose up -d --build
 docker compose logs -f bot
 ```
 
+## Большие файлы (>20 МБ)
+
+`api.telegram.org` не отдаёт файлы больше 20 МБ. Чтобы обрабатывать длинные видео и
+голосовые до **500 МБ**, рядом с ботом поднимается собственный Telegram Bot API
+server (`aiogram/telegram-bot-api`).
+
+1. Получите `api_id` и `api_hash` на https://my.telegram.org/apps
+2. Допишите в `.env`:
+   ```
+   TELEGRAM_BOT_API_URL=http://telegram-bot-api:8081
+   TELEGRAM_API_ID=12345
+   TELEGRAM_API_HASH=abcdef0123456789...
+   TELEGRAM_BOT_API_LOCAL_ROOT=/var/lib/telegram-bot-api
+   ```
+3. **Один раз** перед первым запуском с локальным API разлогиньте бота со старого:
+   ```bash
+   curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/logOut"
+   ```
+4. Запустите профиль `big-files`:
+   ```bash
+   docker compose --profile big-files up -d --build
+   ```
+
+После этого видео/голосовые/аудио до 500 МБ обрабатываются как обычно. Аудиодорожка
+автоматически перекодируется в Opus 16 kbps mono перед отправкой в OpenAI/Gemini
+(≈ 7 МБ на час речи). Если после сжатия запись всё ещё не лезет в лимит провайдера
+(25 МБ OpenAI / 20 МБ Gemini) — она автоматически режется на 30-минутные чанки,
+транскрипция склеивается через `\n\n`.
+
+Если не нужны большие файлы — просто не задавайте `TELEGRAM_BOT_API_URL`, и бот будет
+ходить в `api.telegram.org` с привычным лимитом 20 МБ.
+
 ## Доступ к боту
 
 Бот **по приглашениям**: транскрипции получают только подписчики, добавленные владельцем.
@@ -91,7 +123,10 @@ docker compose logs -f bot
 | `DIGEST_WINDOW_HOURS` | размер окна (по умолчанию 24) |
 | `INVITE_TTL_HOURS` | время жизни инвайт-ссылки |
 | `MAX_CONCURRENT_TRANSCRIPTIONS` | глобальный лимит параллельных задач |
-| `MAX_FILE_BYTES` | максимальный размер файла (20 МБ — лимит Bot API) |
+| `MAX_FILE_BYTES` | максимальный размер файла (500 МБ при self-hosted Bot API; 20 МБ — лимит публичного API) |
+| `TELEGRAM_BOT_API_URL` | URL локального Bot API (пустой = `api.telegram.org`) |
+| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | для self-hosted Bot API (получаются на my.telegram.org) |
+| `TELEGRAM_BOT_API_LOCAL_ROOT` | путь к shared volume внутри bot-контейнера |
 | `DM_SEND_DELAY_MS` | задержка между DM (анти-flood) |
 | `DB_PATH`, `LOG_LEVEL`, `LOG_JSON` | runtime |
 
@@ -170,8 +205,12 @@ VPS живёт в приватной сети (10.x), GitHub Actions cloud-runne
 2. **Папка деплоя**: `mkdir -p ~/tg-transcribe && cd ~/tg-transcribe`
 3. Скопировать с ноутбука: `scp docker-compose.prod.yml atom-server:~/tg-transcribe/`
 4. Создать `~/tg-transcribe/.env` с реальными ключами (см. [.env.example](.env.example)), `chmod 600 .env`
-5. Первый запуск: `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`
-6. `docker compose -f docker-compose.prod.yml logs -f bot` — должны быть `transcribers_loaded`, `scheduler_started`, `bot_started`
+5. Для больших файлов (>20 МБ) добавить в `.env` `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_BOT_API_URL=http://telegram-bot-api:8081`/`TELEGRAM_BOT_API_LOCAL_ROOT=/var/lib/telegram-bot-api` и **разово** разлогинить бота:
+   ```bash
+   curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/logOut"
+   ```
+6. Первый запуск: `docker compose -f docker-compose.prod.yml --profile big-files pull && docker compose -f docker-compose.prod.yml --profile big-files up -d`
+7. `docker compose -f docker-compose.prod.yml logs -f bot` — должны быть `transcribers_loaded`, `scheduler_started`, `bot_started`, и при включённом профиле — `bot_api_local_mode`
 
 ### Подмена `.env` на сервере
 

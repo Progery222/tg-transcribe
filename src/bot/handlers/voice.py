@@ -1,5 +1,9 @@
+import asyncio
+import shutil
+import tempfile
 import time
 from datetime import UTC
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -11,6 +15,7 @@ from aiogram.types import Message, User
 from bot.config import settings
 from bot.db.database import get_db
 from bot.db.queries import ChatSettings, TranscriptionRow, log_transcription
+from bot.services.audio_chunker import split_if_needed
 from bot.services.audio_pipeline import FfmpegError, prepare_payload
 from bot.services.dm_sender import notify_super_admins, send_transcript_dm
 from bot.services.subscriber_service import list_dm_recipients
@@ -22,7 +27,7 @@ from bot.services.transcriber import (
 from bot.services.worker_pool import with_slot
 from bot.texts.ru import t
 from bot.utils.text_split import split_for_telegram
-from bot.utils.tg_files import download_file, extract_media_info
+from bot.utils.tg_files import extract_media_info, fetch_file_path
 
 log = structlog.get_logger(__name__)
 
@@ -121,121 +126,157 @@ async def on_media(
         return
 
     started = time.monotonic()
+    src_path: Path | None = None
+    src_is_temp = False
+    work_dir = Path(tempfile.mkdtemp(prefix="tg-tx-"))
+    text = ""
     try:
-        raw = await download_file(bot, file_id)
-    except TelegramAPIError as e:
-        log.warning("download_failed", err=str(e), file_id=file_id)
-        await notify_super_admins(
-            bot,
-            t("transcript_failed_admin", chat_title=chat_title, error=f"download: {e}"),
-        )
-        await _log(
-            message,
-            content_type,
-            chat_settings,
-            success=False,
-            error_code="download_failed",
-            latency_ms=int((time.monotonic() - started) * 1000),
-            audio_seconds=audio_seconds,
-            transcript_text=None,
-            **base_log_kwargs,
-        )
-        return
-
-    try:
-        payload = await prepare_payload(content_type, raw, mime)
-    except FfmpegError as e:
-        log.warning("ffmpeg_failed", err=str(e), content_type=content_type)
-        await notify_super_admins(
-            bot,
-            t("transcript_failed_admin", chat_title=chat_title, error=f"ffmpeg: {e}"),
-        )
-        await _log(
-            message,
-            content_type,
-            chat_settings,
-            success=False,
-            error_code="ffmpeg_failed",
-            latency_ms=int((time.monotonic() - started) * 1000),
-            audio_seconds=audio_seconds,
-            transcript_text=None,
-            **base_log_kwargs,
-        )
-        return
-
-    try:
-        result = await with_slot(
-            lambda: transcriber.transcribe(
-                payload.data,
-                payload.mime,
-                payload.filename,
-                model=chat_settings.model,
-                language=chat_settings.language,
+        try:
+            src_path, src_is_temp = await fetch_file_path(
+                bot, file_id, local_root=settings.TELEGRAM_BOT_API_LOCAL_ROOT
             )
-        )
-    except TranscriptionTransientError as e:
-        log.warning(
-            "transcribe_transient",
-            provider=chat_settings.provider,
-            model=chat_settings.model,
-            err=str(e),
-        )
-        await notify_super_admins(
-            bot, t("transcript_failed_admin", chat_title=chat_title, error=f"transient: {e}")
-        )
-        await _log(
-            message,
-            content_type,
-            chat_settings,
-            success=False,
-            error_code="transient",
-            latency_ms=int((time.monotonic() - started) * 1000),
-            audio_seconds=audio_seconds,
-            transcript_text=None,
-            **base_log_kwargs,
-        )
-        return
-    except TranscriptionPermanentError as e:
-        log.info(
-            "transcribe_permanent",
-            provider=chat_settings.provider,
-            model=chat_settings.model,
-            err=str(e),
-        )
-        await notify_super_admins(
-            bot, t("transcript_failed_admin", chat_title=chat_title, error=f"permanent: {e}")
-        )
-        await _log(
-            message,
-            content_type,
-            chat_settings,
-            success=False,
-            error_code="permanent",
-            latency_ms=int((time.monotonic() - started) * 1000),
-            audio_seconds=audio_seconds,
-            transcript_text=None,
-            **base_log_kwargs,
-        )
-        return
-    except Exception as e:
-        log.exception("transcribe_crash")
-        await notify_super_admins(
-            bot, t("transcript_failed_admin", chat_title=chat_title, error=f"crash: {e}")
-        )
-        await _log(
-            message,
-            content_type,
-            chat_settings,
-            success=False,
-            error_code="crash",
-            latency_ms=int((time.monotonic() - started) * 1000),
-            audio_seconds=audio_seconds,
-            transcript_text=None,
-            **base_log_kwargs,
-        )
-        return
+        except TelegramAPIError as e:
+            log.warning("download_failed", err=str(e), file_id=file_id)
+            await notify_super_admins(
+                bot,
+                t("transcript_failed_admin", chat_title=chat_title, error=f"download: {e}"),
+            )
+            await _log(
+                message,
+                content_type,
+                chat_settings,
+                success=False,
+                error_code="download_failed",
+                latency_ms=int((time.monotonic() - started) * 1000),
+                audio_seconds=audio_seconds,
+                transcript_text=None,
+                **base_log_kwargs,
+            )
+            return
 
-    text = result.text.strip()
+        try:
+            payload = await prepare_payload(content_type, src_path, mime, work_dir=work_dir)
+        except FfmpegError as e:
+            log.warning("ffmpeg_failed", err=str(e), content_type=content_type)
+            await notify_super_admins(
+                bot,
+                t("transcript_failed_admin", chat_title=chat_title, error=f"ffmpeg: {e}"),
+            )
+            await _log(
+                message,
+                content_type,
+                chat_settings,
+                success=False,
+                error_code="ffmpeg_failed",
+                latency_ms=int((time.monotonic() - started) * 1000),
+                audio_seconds=audio_seconds,
+                transcript_text=None,
+                **base_log_kwargs,
+            )
+            return
+
+        try:
+            chunks = await split_if_needed(payload.path)
+        except FfmpegError as e:
+            log.warning("chunker_failed", err=str(e))
+            await notify_super_admins(
+                bot,
+                t("transcript_failed_admin", chat_title=chat_title, error=f"chunker: {e}"),
+            )
+            await _log(
+                message,
+                content_type,
+                chat_settings,
+                success=False,
+                error_code="ffmpeg_failed",
+                latency_ms=int((time.monotonic() - started) * 1000),
+                audio_seconds=audio_seconds,
+                transcript_text=None,
+                **base_log_kwargs,
+            )
+            return
+
+        try:
+            transcripts: list[str] = []
+            for chunk in chunks:
+                result = await with_slot(
+                    lambda c=chunk: transcriber.transcribe(
+                        c,
+                        payload.mime,
+                        payload.filename,
+                        model=chat_settings.model,
+                        language=chat_settings.language,
+                    )
+                )
+                piece = result.text.strip()
+                if piece:
+                    transcripts.append(piece)
+            text = "\n\n".join(transcripts).strip()
+        except TranscriptionTransientError as e:
+            log.warning(
+                "transcribe_transient",
+                provider=chat_settings.provider,
+                model=chat_settings.model,
+                err=str(e),
+            )
+            await notify_super_admins(
+                bot, t("transcript_failed_admin", chat_title=chat_title, error=f"transient: {e}")
+            )
+            await _log(
+                message,
+                content_type,
+                chat_settings,
+                success=False,
+                error_code="transient",
+                latency_ms=int((time.monotonic() - started) * 1000),
+                audio_seconds=audio_seconds,
+                transcript_text=None,
+                **base_log_kwargs,
+            )
+            return
+        except TranscriptionPermanentError as e:
+            log.info(
+                "transcribe_permanent",
+                provider=chat_settings.provider,
+                model=chat_settings.model,
+                err=str(e),
+            )
+            await notify_super_admins(
+                bot, t("transcript_failed_admin", chat_title=chat_title, error=f"permanent: {e}")
+            )
+            await _log(
+                message,
+                content_type,
+                chat_settings,
+                success=False,
+                error_code="permanent",
+                latency_ms=int((time.monotonic() - started) * 1000),
+                audio_seconds=audio_seconds,
+                transcript_text=None,
+                **base_log_kwargs,
+            )
+            return
+        except Exception as e:
+            log.exception("transcribe_crash")
+            await notify_super_admins(
+                bot, t("transcript_failed_admin", chat_title=chat_title, error=f"crash: {e}")
+            )
+            await _log(
+                message,
+                content_type,
+                chat_settings,
+                success=False,
+                error_code="crash",
+                latency_ms=int((time.monotonic() - started) * 1000),
+                audio_seconds=audio_seconds,
+                transcript_text=None,
+                **base_log_kwargs,
+            )
+            return
+    finally:
+        if src_is_temp and src_path is not None:
+            await asyncio.to_thread(Path(src_path).unlink, missing_ok=True)
+        await asyncio.to_thread(shutil.rmtree, work_dir, ignore_errors=True)
     await _log(
         message,
         content_type,
