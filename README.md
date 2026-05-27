@@ -150,47 +150,44 @@ uv run pytest -v
 
 ## Deployment
 
-Auto-deploy: push в `main` → GitHub Actions запускает `test` → `build-and-push` (image в GHCR) → `deploy` (SSH на VPS → `docker compose pull && up -d`).
+Auto-deploy: push в `main` → GitHub Actions запускает `test` (ubuntu-latest) → `build-and-push` image в GHCR (ubuntu-latest) → `deploy` (self-hosted runner на VPS делает `docker compose pull && up -d` локально).
+
+### Архитектура
+
+VPS живёт в приватной сети (10.x), GitHub Actions cloud-runner не может ssh-иться напрямую. Поэтому на сервере крутится **self-hosted GitHub Actions runner** как systemd service — он сам поллит github.com по outbound HTTPS и выполняет деплой локально без SSH.
 
 ### Первичный setup VPS
 
-1. `sudo mkdir -p /opt/tg-transcribe && sudo chown $USER /opt/tg-transcribe`
-2. С ноутбука: `scp docker-compose.prod.yml user@vps:/opt/tg-transcribe/`
-3. На VPS: создать `/opt/tg-transcribe/.env` с реальными ключами (см. [.env.example](.env.example)), `chmod 600 .env`
-4. На github.com → Settings → Developer settings → Personal access tokens (classic) → Generate new (scope `read:packages`, no expiration)
-5. На VPS: `echo $PAT | docker login ghcr.io -u Progery222 --password-stdin`
-6. `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`
-7. `docker compose -f docker-compose.prod.yml logs -f bot` — должны быть `transcribers_loaded`, `scheduler_started`, `bot_started`
-
-### SSH-ключ для CI (один раз на ноутбуке)
-
-```bash
-ssh-keygen -t ed25519 -f ~/deploy_key -C github-actions-tg-transcribe -N ""
-ssh-copy-id -i ~/deploy_key.pub user@vps
-gh secret set VPS_SSH_KEY < ~/deploy_key
-gh secret set VPS_HOST --body "<IP>"
-gh secret set VPS_USER --body "<user>"
-gh secret set VPS_PATH --body "/opt/tg-transcribe"
-# (опц.) gh secret set VPS_SSH_PORT --body "2222"
-ssh -i ~/deploy_key user@vps "docker ps"   # smoke
-shred -u ~/deploy_key                       # удалить локальную копию
-```
+1. **Self-hosted runner**: на github.com/Progery222/tg-transcribe → Settings → Actions → Runners → New self-hosted runner. На сервере:
+   ```bash
+   mkdir -p ~/actions-runner && cd ~/actions-runner
+   curl -sSL -o runner.tar.gz https://github.com/actions/runner/releases/download/v2.334.0/actions-runner-linux-x64-2.334.0.tar.gz
+   tar xzf runner.tar.gz && rm runner.tar.gz
+   ./config.sh --url https://github.com/Progery222/tg-transcribe --token <REGISTRATION_TOKEN> --name $(hostname) --labels self-hosted,Linux,X64 --unattended
+   sudo ./svc.sh install $USER
+   sudo ./svc.sh start
+   ```
+2. **Папка деплоя**: `mkdir -p ~/tg-transcribe && cd ~/tg-transcribe`
+3. Скопировать с ноутбука: `scp docker-compose.prod.yml atom-server:~/tg-transcribe/`
+4. Создать `~/tg-transcribe/.env` с реальными ключами (см. [.env.example](.env.example)), `chmod 600 .env`
+5. Первый запуск: `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d`
+6. `docker compose -f docker-compose.prod.yml logs -f bot` — должны быть `transcribers_loaded`, `scheduler_started`, `bot_started`
 
 ### Подмена `.env` на сервере
 
 `.env` не управляется CI. Чтобы ротировать ключ:
 
 ```bash
-ssh user@vps
-sudo nano /opt/tg-transcribe/.env
-docker compose -f /opt/tg-transcribe/docker-compose.prod.yml up -d
+ssh atom-server
+nano ~/tg-transcribe/.env
+docker compose -f ~/tg-transcribe/docker-compose.prod.yml up -d
 ```
 
 ### Rollback
 
 ```bash
-ssh user@vps
-cd /opt/tg-transcribe
+ssh atom-server
+cd ~/tg-transcribe
 IMAGE_TAG=sha-<previous_full_sha> docker compose -f docker-compose.prod.yml up -d
 ```
 
