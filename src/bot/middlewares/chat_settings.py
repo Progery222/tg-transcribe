@@ -11,7 +11,7 @@ from bot.db.database import get_db
 from bot.db.queries import (
     ChatSettings,
     get_chat_settings,
-    upsert_chat,
+    touch_chat,
     upsert_chat_settings,
 )
 
@@ -57,17 +57,15 @@ class ChatSettingsMiddleware(BaseMiddleware):
                     )
                 data["chat_settings"] = cs
 
-                # Self-heal `chats` table for groups. If we are receiving a message
-                # from a group, the bot is by definition a member right now — so it's
-                # safe to mark active=True. Worst case: a late buffered message after
-                # a kick briefly re-activates the row; the next genuine activity will
-                # settle it. The benefit is that DM commands (`/model`, `/enable`)
-                # never present an empty group list while the bot is in fact running.
+                # Self-heal `chats` table for groups: covers installs that had the
+                # bot before `my_chat_member` handler shipped. ``touch_chat`` updates
+                # title/last_seen_at without overriding ``active`` (so a late message
+                # arriving after a kick can't flip the row back to active=1).
                 if isinstance(event, Message) and event.chat.type in {
                     ChatType.GROUP,
                     ChatType.SUPERGROUP,
                 }:
-                    await upsert_chat(conn, event.chat.id, event.chat.title, active=True)
+                    await touch_chat(conn, event.chat.id, event.chat.title)
             except Exception:
                 log.exception(
                     "chat_settings_load_failed",
