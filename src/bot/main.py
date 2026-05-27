@@ -17,6 +17,7 @@ from bot.config import settings
 from bot.db.database import close_db, init_db
 from bot.handlers import register_handlers
 from bot.logging_setup import configure_logging
+from bot.services.commands_menu import setup_bot_commands
 from bot.services.digest_service import start_scheduler, stop_scheduler
 from bot.services.gemini_transcriber import GeminiTranscriber
 from bot.services.openai_transcriber import OpenAITranscriber
@@ -91,6 +92,8 @@ async def run() -> None:
         )
 
     scheduler = start_scheduler(bot)
+
+    await setup_bot_commands(bot, settings.bot_admin_ids)
 
     log.info("bot_started", mode=settings.BOT_MODE, username=me.username)
 
