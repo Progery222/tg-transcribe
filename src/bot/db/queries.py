@@ -30,6 +30,27 @@ async def get_chat_settings(conn: aiosqlite.Connection, chat_id: int) -> ChatSet
     )
 
 
+async def set_model_for_all_groups(
+    conn: aiosqlite.Connection, *, provider: str, model: str
+) -> int:
+    """Update provider/model on every chat_settings row representing a group
+    (chat_id < 0 — Telegram convention for groups/supergroups). Returns the
+    number of rows touched.
+    """
+    cur = await conn.execute(
+        """
+        UPDATE chat_settings
+        SET provider   = ?,
+            model      = ?,
+            updated_at = datetime('now')
+        WHERE chat_id < 0
+        """,
+        (provider, model),
+    )
+    await conn.commit()
+    return cur.rowcount
+
+
 async def upsert_chat_settings(
     conn: aiosqlite.Connection,
     chat_id: int,

@@ -70,18 +70,15 @@ _STRINGS: dict[str, str] = {
     "invite_invalid_or_expired": "Эта ссылка недействительна или уже использована.",
     # Model picker (super-admin only now)
     "model_picker_title": "Выберите модель для этого чата:",
-    "model_picker_title_named": "Выберите модель для <b>{chat}</b>:",
+    "model_picker_title_global": "Выберите модель — она применится ко всем группам бота:",
     "model_picker_cancel": "Отмена",
     "model_set": "Модель установлена: <b>{label}</b>",
-    "model_set_named": "Модель установлена для <b>{chat}</b>: <b>{label}</b>",
+    "model_set_global": "Модель <b>{label}</b> установлена для всех групп ({count}).",
     "model_cancelled": "Отменено.",
-    # Group picker (DM)
-    "groups_picker_title": "Выберите группу ({action}):",
     # Group monitoring toggle
     "enabled": "Мониторинг этой группы включён.",
     "disabled": "Мониторинг этой группы выключен.",
-    "enabled_named": "Мониторинг <b>{chat}</b> включён.",
-    "disabled_named": "Мониторинг <b>{chat}</b> выключен.",
+    "toggle_group_only": "Команды /enable и /disable работают только в группе с ботом.",
     # Daily digest
     "digest_caption": "Сводка: {group} · {date}",
     "digest_header": "Группа: {group}\nПериод: {start} — {end} ({tz})",
