@@ -5,7 +5,11 @@ from datetime import UTC, datetime, timedelta, tzinfo
 import aiosqlite
 import structlog
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import (
+    TelegramForbiddenError,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+)
 from aiogram.types import BufferedInputFile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -107,31 +111,59 @@ async def _send_digest(bot: Bot, scheduled_for_utc: datetime) -> int:
     return sent_total
 
 
+_SEND_DOC_MAX_ATTEMPTS = 4
+
+
 async def _send_doc(
     bot: Bot, user_id: int, fname: str, data: bytes, title: str, date_str: str
 ) -> bool:
+    """Deliver a single digest file to one user, retrying transient failures.
+
+    Retries on Telegram-side flood limits (``TelegramRetryAfter``) and on
+    transport-level glitches (``TelegramNetworkError`` — covers Docker DNS
+    flakes and connection resets). ``TelegramForbiddenError`` is terminal —
+    the user has blocked the bot, no point retrying.
+    """
     caption = t("digest_caption", group=title, date=date_str)
-    doc = BufferedInputFile(data, filename=fname)
-    try:
-        await bot.send_document(user_id, doc, caption=caption)
-        return True
-    except TelegramRetryAfter as e:
-        log.warning("digest_flood", retry_after=e.retry_after, user_id=user_id)
-        await asyncio.sleep(e.retry_after + 0.5)
+    last_err: Exception | None = None
+    for attempt in range(1, _SEND_DOC_MAX_ATTEMPTS + 1):
         try:
-            await bot.send_document(
-                user_id, BufferedInputFile(data, filename=fname), caption=caption
-            )
+            doc = BufferedInputFile(data, filename=fname)
+            await bot.send_document(user_id, doc, caption=caption)
             return True
-        except Exception:
-            log.exception("digest_retry_failed", user_id=user_id, file=fname)
+        except TelegramForbiddenError:
+            log.info("digest_dm_blocked", user_id=user_id)
             return False
-    except TelegramForbiddenError:
-        log.info("digest_dm_blocked", user_id=user_id)
-        return False
-    except Exception:
-        log.exception("digest_send_failed", user_id=user_id, file=fname)
-        return False
+        except TelegramRetryAfter as e:
+            last_err = e
+            log.warning(
+                "digest_flood", retry_after=e.retry_after, user_id=user_id, attempt=attempt
+            )
+            await asyncio.sleep(e.retry_after + 0.5)
+        except TelegramNetworkError as e:
+            last_err = e
+            backoff = min(2 ** (attempt - 1), 30)
+            log.warning(
+                "digest_network_retry",
+                attempt=attempt,
+                backoff=backoff,
+                user_id=user_id,
+                file=fname,
+                err=str(e),
+            )
+            await asyncio.sleep(backoff)
+        except Exception:
+            log.exception("digest_send_failed", user_id=user_id, file=fname)
+            return False
+
+    log.error(
+        "digest_send_exhausted",
+        user_id=user_id,
+        file=fname,
+        attempts=_SEND_DOC_MAX_ATTEMPTS,
+        last_err=str(last_err) if last_err else None,
+    )
+    return False
 
 
 async def run_digest_now(bot: Bot) -> int:
