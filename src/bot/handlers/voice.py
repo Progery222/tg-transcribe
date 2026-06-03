@@ -133,7 +133,10 @@ async def on_media(
     try:
         try:
             src_path, src_is_temp = await fetch_file_path(
-                bot, file_id, local_root=settings.TELEGRAM_BOT_API_LOCAL_ROOT
+                bot,
+                file_id,
+                local_root=settings.TELEGRAM_BOT_API_LOCAL_ROOT,
+                fetch_timeout=settings.FILE_FETCH_TIMEOUT,
             )
         except TelegramAPIError as e:
             log.warning("download_failed", err=str(e), file_id=file_id)

@@ -29,6 +29,7 @@ async def fetch_file_path(
     file_id: str,
     *,
     local_root: str = "",
+    fetch_timeout: float = 600.0,
 ) -> tuple[Path, bool]:
     """Locate the Telegram file on disk.
 
@@ -41,7 +42,7 @@ async def fetch_file_path(
 
     Returns ``(path, is_temp)`` — ``is_temp=True`` means caller should unlink.
     """
-    file = await bot.get_file(file_id)
+    file = await bot.get_file(file_id, request_timeout=int(fetch_timeout))
     raw_path = file.file_path or ""
 
     if local_root and raw_path and (raw_path.startswith("/") or ":" in raw_path[:3]):
@@ -58,5 +59,5 @@ async def fetch_file_path(
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=Path(raw_path).suffix or ".bin") as tmp:
         dst = Path(tmp.name)
-    await bot.download_file(raw_path, destination=str(dst))
+    await bot.download_file(raw_path, destination=str(dst), timeout=int(fetch_timeout))
     return dst, True
