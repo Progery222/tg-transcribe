@@ -5,7 +5,7 @@ import pytest
 
 from bot.db.database import get_db
 from bot.db.queries import TranscriptionRow, log_transcription, upsert_chat
-from bot.services.digest_service import _build_file_for_chat, _slug
+from bot.services.digest_service import _build_file_for_chat, _manual_window, _slug
 
 pytestmark = pytest.mark.usefixtures("tmp_db")
 
@@ -86,6 +86,22 @@ async def test_slug_cyrillic_fallback() -> None:
     assert _slug(None, 200) == "chat_200"
     assert _slug("Work Chat", 300) == "Work_Chat"
     assert _slug("a/b/c", 400) == "a_b_c"
+
+
+async def test_manual_window_after_fire() -> None:
+    # Run at 14:30 MSK: window is [today 10:00 MSK, now).
+    now = datetime(2026, 6, 3, 14, 30, tzinfo=MSK)
+    start_utc, end_utc = _manual_window(now)
+    assert start_utc == datetime(2026, 6, 3, 10, 0, tzinfo=MSK).astimezone(UTC)
+    assert end_utc == now.astimezone(UTC)
+
+
+async def test_manual_window_before_fire() -> None:
+    # Run at 08:00 MSK, before today's 10:00 fire: window starts yesterday 10:00.
+    now = datetime(2026, 6, 3, 8, 0, tzinfo=MSK)
+    start_utc, end_utc = _manual_window(now)
+    assert start_utc == datetime(2026, 6, 2, 10, 0, tzinfo=MSK).astimezone(UTC)
+    assert end_utc == now.astimezone(UTC)
 
 
 async def test_per_chat_files_separate() -> None:

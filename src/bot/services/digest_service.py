@@ -69,10 +69,8 @@ async def _build_file_for_chat(
     return fname, content
 
 
-async def _send_digest(bot: Bot, scheduled_for_utc: datetime) -> int:
+async def _send_digest(bot: Bot, start_utc: datetime, end_utc: datetime) -> int:
     tz = settings.digest_tz
-    end_utc = scheduled_for_utc
-    start_utc = end_utc - timedelta(hours=settings.DIGEST_WINDOW_HOURS)
 
     conn = await get_db()
     recipients = await list_dm_recipients(conn)
@@ -136,9 +134,7 @@ async def _send_doc(
             return False
         except TelegramRetryAfter as e:
             last_err = e
-            log.warning(
-                "digest_flood", retry_after=e.retry_after, user_id=user_id, attempt=attempt
-            )
+            log.warning("digest_flood", retry_after=e.retry_after, user_id=user_id, attempt=attempt)
             await asyncio.sleep(e.retry_after + 0.5)
         except TelegramNetworkError as e:
             last_err = e
@@ -166,37 +162,48 @@ async def _send_doc(
     return False
 
 
-async def run_digest_now(bot: Bot) -> int:
-    """Manual trigger. Window mirrors the most recent scheduled fire instant."""
-    tz = settings.digest_tz
-    now_local = datetime.now(tz)
-    snapped = now_local.replace(
+def _manual_window(now_local: datetime) -> tuple[datetime, datetime]:
+    """Window for a manual /digest_now: from the most recent scheduled digest
+    (the last DIGEST_HOUR:DIGEST_MINUTE fire) up to ``now`` — i.e. the slice of
+    the day the automatic morning digest hasn't covered yet. Returns UTC bounds.
+    """
+    last_fire = now_local.replace(
         hour=settings.DIGEST_HOUR,
         minute=settings.DIGEST_MINUTE,
         second=0,
         microsecond=0,
     )
-    if snapped > now_local:
-        snapped -= timedelta(days=1)
-    return await _send_digest(bot, snapped.astimezone(UTC))
+    if last_fire > now_local:
+        last_fire -= timedelta(days=1)
+    return last_fire.astimezone(UTC), now_local.astimezone(UTC)
+
+
+async def run_digest_now(bot: Bot) -> int:
+    """Manual trigger. Covers everything since the most recent scheduled digest
+    up to now — the slice of the current day not yet sent by the automatic 10:00
+    digest (see :func:`_manual_window`)."""
+    start_utc, end_utc = _manual_window(datetime.now(settings.digest_tz))
+    return await _send_digest(bot, start_utc, end_utc)
 
 
 async def _send_digest_scheduled(bot: Bot) -> None:
     tz = settings.digest_tz
-    now_local = datetime.now(tz).replace(
+    fire_local = datetime.now(tz).replace(
         hour=settings.DIGEST_HOUR,
         minute=settings.DIGEST_MINUTE,
         second=0,
         microsecond=0,
     )
+    end_utc = fire_local.astimezone(UTC)
+    start_utc = end_utc - timedelta(hours=settings.DIGEST_WINDOW_HOURS)
     try:
-        await _send_digest(bot, now_local.astimezone(UTC))
+        await _send_digest(bot, start_utc, end_utc)
     except Exception:
         # Swallow the exception so APScheduler doesn't escalate it; the next day's
         # fire will run independently. Operator can inspect this structured log.
         log.exception(
             "digest_scheduled_failed",
-            scheduled_for_local=now_local.isoformat(),
+            scheduled_for_local=fire_local.isoformat(),
             tz=settings.DIGEST_TZ,
         )
 
