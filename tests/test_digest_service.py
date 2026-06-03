@@ -1,11 +1,26 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from bot.db.database import get_db
-from bot.db.queries import TranscriptionRow, log_transcription, upsert_chat
-from bot.services.digest_service import _build_file_for_chat, _manual_window, _slug
+from bot.db.queries import Chat, TranscriptionRow, log_transcription, upsert_chat
+from bot.keyboards.inline import (
+    CB_DIGEST_ALL,
+    CB_DIGEST_CANCEL,
+    CB_DIGEST_ONE_PREFIX,
+    digest_group_picker_kb,
+    parse_digest_group_callback,
+)
+from bot.services import digest_service as ds
+from bot.services.digest_service import (
+    _build_file_for_chat,
+    _manual_window,
+    _send_digest,
+    _slug,
+)
 
 pytestmark = pytest.mark.usefixtures("tmp_db")
 
@@ -120,3 +135,60 @@ async def test_per_chat_files_separate() -> None:
     assert "beta-msg" in b[1].decode()
     assert "beta-msg" not in a[1].decode()
     assert "alpha-msg" not in b[1].decode()
+
+
+def test_digest_group_picker_kb_lists_groups_all_cancel() -> None:
+    chats = [
+        Chat(chat_id=-10, title="Alpha", active=True),
+        Chat(chat_id=-20, title=None, active=True),
+    ]
+    kb = digest_group_picker_kb(chats)
+    flat = [b for row in kb.inline_keyboard for b in row]
+    assert len(flat) == 4  # one per group + "all" + "cancel"
+    assert flat[0].text == "Alpha"
+    assert flat[0].callback_data == f"{CB_DIGEST_ONE_PREFIX}-10"
+    assert flat[1].text == "Chat -20"  # fallback label when title is None
+    assert flat[1].callback_data == f"{CB_DIGEST_ONE_PREFIX}-20"
+    assert flat[2].callback_data == CB_DIGEST_ALL
+    assert flat[3].callback_data == CB_DIGEST_CANCEL
+
+
+def test_parse_digest_group_callback() -> None:
+    assert parse_digest_group_callback(f"{CB_DIGEST_ONE_PREFIX}-100500") == -100500
+    assert parse_digest_group_callback(CB_DIGEST_ALL) is None
+    assert parse_digest_group_callback(f"{CB_DIGEST_ONE_PREFIX}nope") is None
+
+
+async def _seed_two_groups(monkeypatch: pytest.MonkeyPatch) -> tuple[datetime, datetime]:
+    # Pin recipients so the assertions don't depend on real BOT_ADMIN_IDS from .env.
+    monkeypatch.setattr(ds, "list_dm_recipients", AsyncMock(return_value={111}))
+    conn = await get_db()
+    await upsert_chat(conn, -10, "Alpha")
+    await upsert_chat(conn, -20, "Beta")
+    end_utc = datetime(2026, 6, 3, 11, 0, tzinfo=UTC)
+    start_utc = end_utc - timedelta(hours=2)
+    await _seed_row(chat_id=-10, text="alpha-msg", when_utc=end_utc - timedelta(minutes=30))
+    await _seed_row(chat_id=-20, text="beta-msg", when_utc=end_utc - timedelta(minutes=30))
+    return start_utc, end_utc
+
+
+async def test_send_digest_filters_to_one_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    start_utc, end_utc = await _seed_two_groups(monkeypatch)
+    bot = SimpleNamespace(send_document=AsyncMock())
+    sent = await _send_digest(bot, start_utc, end_utc, only_chat_id=-10)
+    assert sent == 1
+    assert bot.send_document.await_count == 1
+    caption = bot.send_document.await_args.kwargs["caption"]
+    assert "Alpha" in caption
+    assert "Beta" not in caption
+
+
+async def test_send_digest_all_chats_when_no_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    start_utc, end_utc = await _seed_two_groups(monkeypatch)
+    bot = SimpleNamespace(send_document=AsyncMock())
+    sent = await _send_digest(bot, start_utc, end_utc)
+    assert sent == 2
+    assert bot.send_document.await_count == 2
+    captions = " ".join(c.kwargs["caption"] for c in bot.send_document.await_args_list)
+    assert "Alpha" in captions
+    assert "Beta" in captions

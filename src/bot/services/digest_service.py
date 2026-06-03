@@ -69,7 +69,9 @@ async def _build_file_for_chat(
     return fname, content
 
 
-async def _send_digest(bot: Bot, start_utc: datetime, end_utc: datetime) -> int:
+async def _send_digest(
+    bot: Bot, start_utc: datetime, end_utc: datetime, only_chat_id: int | None = None
+) -> int:
     tz = settings.digest_tz
 
     conn = await get_db()
@@ -79,6 +81,8 @@ async def _send_digest(bot: Bot, start_utc: datetime, end_utc: datetime) -> int:
         return 0
 
     chats = await list_active_chats(conn)
+    if only_chat_id is not None:
+        chats = [c for c in chats if c.chat_id == only_chat_id]
     files: list[tuple[str, bytes, str]] = []
     for c in chats:
         built = await _build_file_for_chat(conn, c.chat_id, c.title, start_utc, end_utc, tz)
@@ -178,12 +182,13 @@ def _manual_window(now_local: datetime) -> tuple[datetime, datetime]:
     return last_fire.astimezone(UTC), now_local.astimezone(UTC)
 
 
-async def run_digest_now(bot: Bot) -> int:
+async def run_digest_now(bot: Bot, only_chat_id: int | None = None) -> int:
     """Manual trigger. Covers everything since the most recent scheduled digest
     up to now — the slice of the current day not yet sent by the automatic 10:00
-    digest (see :func:`_manual_window`)."""
+    digest (see :func:`_manual_window`). Pass ``only_chat_id`` to limit the digest
+    to a single group; ``None`` covers every active group."""
     start_utc, end_utc = _manual_window(datetime.now(settings.digest_tz))
-    return await _send_digest(bot, start_utc, end_utc)
+    return await _send_digest(bot, start_utc, end_utc, only_chat_id=only_chat_id)
 
 
 async def _send_digest_scheduled(bot: Bot) -> None:

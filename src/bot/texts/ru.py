@@ -86,6 +86,9 @@ _STRINGS: dict[str, str] = {
     "digest_now_running": "Запускаю сводку…",
     "digest_now_done": "Готово. Отправлено документов: {files}",
     "digest_now_failed": "⚠️ Ошибка при сборке сводки. Проверьте логи.",
+    "digest_pick_group": "Выберите группу для сводки:",
+    "digest_picker_all": "📋 Все группы",
+    "digest_cancelled": "Отменено.",
 }
 
 

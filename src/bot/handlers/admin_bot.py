@@ -1,15 +1,12 @@
-import structlog
 from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from bot.db.database import get_db
 from bot.db.queries import list_active_chats
+from bot.keyboards.inline import digest_group_picker_kb
 from bot.services import subscriber_service as ss
-from bot.services.digest_service import run_digest_now
 from bot.texts.ru import t
-
-log = structlog.get_logger(__name__)
 
 router = Router(name="admin_bot")
 
@@ -103,12 +100,10 @@ async def cmd_chats(message: Message) -> None:
 
 
 @router.message(Command("digest_now"))
-async def cmd_digest_now(message: Message, bot: Bot) -> None:
-    await message.reply(t("digest_now_running"))
-    try:
-        sent = await run_digest_now(bot)
-    except Exception:
-        log.exception("digest_now_failed")
-        await message.reply(t("digest_now_failed"))
+async def cmd_digest_now(message: Message) -> None:
+    conn = await get_db()
+    chats = await list_active_chats(conn)
+    if not chats:
+        await message.reply(t("chats_empty"))
         return
-    await message.reply(t("digest_now_done", files=sent))
+    await message.reply(t("digest_pick_group"), reply_markup=digest_group_picker_kb(chats))

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from bot.db.database import get_db
+from bot.db.queries import upsert_chat
 from bot.handlers import admin_bot as ab
 from bot.services import subscriber_service as ss
 
@@ -63,6 +64,22 @@ async def test_chats_empty() -> None:
     msg = _msg()
     await ab.cmd_chats(msg)
     msg.reply.assert_awaited_once()
+
+
+async def test_digest_now_shows_group_picker() -> None:
+    conn = await get_db()
+    await upsert_chat(conn, -10, "Alpha")
+    msg = _msg()
+    await ab.cmd_digest_now(msg)
+    msg.reply.assert_awaited_once()
+    assert msg.reply.await_args.kwargs.get("reply_markup") is not None
+
+
+async def test_digest_now_no_chats_no_picker() -> None:
+    msg = _msg()
+    await ab.cmd_digest_now(msg)
+    msg.reply.assert_awaited_once()
+    assert msg.reply.await_args.kwargs.get("reply_markup") is None
 
 
 async def test_invite_creates_url() -> None:
