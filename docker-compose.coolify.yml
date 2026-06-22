@@ -1,0 +1,52 @@
+# Coolify deployment for tg-transcribe (runner-free; bot built from Dockerfile).
+# Outbound Telegram bot — no inbound port. Self-hosted telegram-bot-api for >20MB files.
+# Reuses the pre-existing named volumes as external so chat state survives the cutover.
+services:
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    restart: unless-stopped
+    # Run as botuser (1001:999) so files in the shared volume are readable by `bot`.
+    user: "1001:999"
+    entrypoint: ["telegram-bot-api"]
+    command:
+      - "--dir=/var/lib/telegram-bot-api"
+      - "--temp-dir=/var/lib/telegram-bot-api/.tmp"
+      - "--local"
+      - "--http-port=8081"
+      - "--http-stat-port=8082"
+      - "--verbosity=1"
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tg-transcribe-app:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - bot_data:/app/data
+      - telegram_bot_api_data:/var/lib/telegram-bot-api:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bot_data:
+    external: true
+    name: tg-transcribe_bot_data
+  telegram_bot_api_data:
+    external: true
+    name: tg-transcribe_telegram_bot_api_data
