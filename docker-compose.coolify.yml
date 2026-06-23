@@ -30,7 +30,7 @@ services:
       - "--local"
       - "--http-port=8081"
       - "--http-stat-port=8082"
-      - "--verbosity=4"
+      - "--verbosity=1"
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
