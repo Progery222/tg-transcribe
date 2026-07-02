@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     LOG_JSON: bool = False
     BOT_MODE: Literal["polling", "webhook"] = "polling"
 
+    # Ingest — daily digest file POST to external endpoint
+    INGEST_ENABLED: bool = False
+    INGEST_URL: str = ""
+    INGEST_CHAT_IDS: str = ""  # comma-separated chat ids; empty = all
+
     @model_validator(mode="after")
     def _check_provider_keys(self) -> "Settings":
         if self.DEFAULT_PROVIDER == "openai" and not self.OPENAI_API_KEY:
@@ -71,11 +76,21 @@ class Settings(BaseSettings):
                 "TELEGRAM_API_ID and TELEGRAM_API_HASH are required when "
                 "TELEGRAM_BOT_API_URL is set"
             )
+        try:
+            _ = self.ingest_chat_ids
+        except ValueError as e:
+            raise ValueError(
+                f"INGEST_CHAT_IDS must be comma-separated integers: {e}"
+            ) from e
         return self
 
     @property
     def bot_admin_ids(self) -> list[int]:
         return [int(x.strip()) for x in self.BOT_ADMIN_IDS.split(",") if x.strip()]
+
+    @property
+    def ingest_chat_ids(self) -> list[int]:
+        return [int(x.strip()) for x in self.INGEST_CHAT_IDS.split(",") if x.strip()]
 
     @property
     def digest_tz(self) -> ZoneInfo:

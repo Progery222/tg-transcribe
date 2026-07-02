@@ -17,6 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from bot.config import settings
 from bot.db.database import get_db
 from bot.db.queries import fetch_digest_rows, list_active_chats
+from bot.services.ingest_notifier import send_digest_ingest
 from bot.services.subscriber_service import list_dm_recipients
 from bot.texts.ru import t
 
@@ -70,25 +71,24 @@ async def _build_file_for_chat(
 
 
 async def _send_digest(
-    bot: Bot, start_utc: datetime, end_utc: datetime, only_chat_id: int | None = None
+    bot: Bot,
+    start_utc: datetime,
+    end_utc: datetime,
+    only_chat_id: int | None = None,
+    ingest: bool = False,
 ) -> int:
     tz = settings.digest_tz
 
     conn = await get_db()
-    recipients = await list_dm_recipients(conn)
-    if not recipients:
-        log.info("digest_no_recipients")
-        return 0
-
     chats = await list_active_chats(conn)
     if only_chat_id is not None:
         chats = [c for c in chats if c.chat_id == only_chat_id]
-    files: list[tuple[str, bytes, str]] = []
+    files: list[tuple[str, bytes, str, int]] = []
     for c in chats:
         built = await _build_file_for_chat(conn, c.chat_id, c.title, start_utc, end_utc, tz)
         if built:
             fname, data = built
-            files.append((fname, data, c.title or f"Chat {c.chat_id}"))
+            files.append((fname, data, c.title or f"Chat {c.chat_id}", c.chat_id))
 
     if not files:
         log.info(
@@ -98,11 +98,24 @@ async def _send_digest(
         )
         return 0
 
+    if ingest:
+        for _fname, data, _title, chat_id in files:
+            try:
+                await send_digest_ingest(chat_id, data)
+            except Exception:
+                # A broken ingest must never cost subscribers their daily DMs.
+                log.exception("ingest_crash", chat_id=chat_id)
+
+    recipients = await list_dm_recipients(conn)
+    if not recipients:
+        log.info("digest_no_recipients")
+        return 0
+
     date_str = end_utc.astimezone(tz).strftime("%Y-%m-%d")
     sent_total = 0
     delay = settings.DM_SEND_DELAY_MS / 1000
     for uid in recipients:
-        for fname, data, title in files:
+        for fname, data, title, _chat_id in files:
             sent = await _send_doc(bot, uid, fname, data, title, date_str)
             if sent:
                 sent_total += 1
@@ -202,7 +215,7 @@ async def _send_digest_scheduled(bot: Bot) -> None:
     end_utc = fire_local.astimezone(UTC)
     start_utc = end_utc - timedelta(hours=settings.DIGEST_WINDOW_HOURS)
     try:
-        await _send_digest(bot, start_utc, end_utc)
+        await _send_digest(bot, start_utc, end_utc, ingest=True)
     except Exception:
         # Swallow the exception so APScheduler doesn't escalate it; the next day's
         # fire will run independently. Operator can inspect this structured log.

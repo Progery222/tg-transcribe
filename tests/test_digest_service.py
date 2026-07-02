@@ -192,3 +192,77 @@ async def test_send_digest_all_chats_when_no_filter(monkeypatch: pytest.MonkeyPa
     captions = " ".join(c.kwargs["caption"] for c in bot.send_document.await_args_list)
     assert "Alpha" in captions
     assert "Beta" in captions
+
+
+async def test_send_digest_ingest_posts_each_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    start_utc, end_utc = await _seed_two_groups(monkeypatch)
+    ingest = AsyncMock(return_value=True)
+    monkeypatch.setattr(ds, "send_digest_ingest", ingest)
+    bot = SimpleNamespace(send_document=AsyncMock())
+
+    sent = await _send_digest(bot, start_utc, end_utc, ingest=True)
+
+    assert sent == 2  # DM fanout intact
+    assert ingest.await_count == 2
+    by_chat = {c.args[0]: c.args[1] for c in ingest.await_args_list}
+    assert "alpha-msg" in by_chat[-10].decode()
+    assert "beta-msg" in by_chat[-20].decode()
+
+
+async def test_send_digest_ingest_runs_without_dm_recipients(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_utc, end_utc = await _seed_two_groups(monkeypatch)
+    monkeypatch.setattr(ds, "list_dm_recipients", AsyncMock(return_value=set()))
+    ingest = AsyncMock(return_value=True)
+    monkeypatch.setattr(ds, "send_digest_ingest", ingest)
+    bot = SimpleNamespace(send_document=AsyncMock())
+
+    sent = await _send_digest(bot, start_utc, end_utc, ingest=True)
+
+    assert sent == 0
+    assert bot.send_document.await_count == 0
+    assert ingest.await_count == 2
+
+
+async def test_send_digest_no_ingest_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    start_utc, end_utc = await _seed_two_groups(monkeypatch)
+    ingest = AsyncMock(return_value=True)
+    monkeypatch.setattr(ds, "send_digest_ingest", ingest)
+    bot = SimpleNamespace(send_document=AsyncMock())
+
+    sent = await _send_digest(bot, start_utc, end_utc)
+
+    assert sent == 2
+    assert ingest.await_count == 0
+
+
+async def test_ingest_failure_does_not_break_dm_fanout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_utc, end_utc = await _seed_two_groups(monkeypatch)
+    ingest = AsyncMock(side_effect=RuntimeError("ingest exploded"))
+    monkeypatch.setattr(ds, "send_digest_ingest", ingest)
+    bot = SimpleNamespace(send_document=AsyncMock())
+
+    sent = await _send_digest(bot, start_utc, end_utc, ingest=True)
+
+    assert ingest.await_count == 2
+    assert sent == 2
+    assert bot.send_document.await_count == 2
+
+
+async def test_scheduled_digest_passes_ingest_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = AsyncMock(return_value=0)
+    monkeypatch.setattr(ds, "_send_digest", send)
+    await ds._send_digest_scheduled(bot=SimpleNamespace())
+    assert send.await_count == 1
+    assert send.await_args.kwargs.get("ingest") is True
+
+
+async def test_run_digest_now_does_not_ingest(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = AsyncMock(return_value=0)
+    monkeypatch.setattr(ds, "_send_digest", send)
+    await ds.run_digest_now(SimpleNamespace())
+    assert send.await_count == 1
+    assert send.await_args.kwargs.get("ingest", False) is False

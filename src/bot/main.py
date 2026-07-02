@@ -20,6 +20,7 @@ from bot.logging_setup import configure_logging
 from bot.services.commands_menu import setup_bot_commands
 from bot.services.digest_service import start_scheduler, stop_scheduler
 from bot.services.gemini_transcriber import GeminiTranscriber
+from bot.services.ingest_notifier import aclose_ingest
 from bot.services.openai_transcriber import OpenAITranscriber
 from bot.services.transcriber import Transcriber
 
@@ -107,5 +108,6 @@ async def run() -> None:
         gemini = transcribers.get("gemini")
         if gemini is not None and hasattr(gemini, "aclose"):
             await gemini.aclose()  # type: ignore[union-attr]
+        await aclose_ingest()
         await bot.session.close()
         await close_db()

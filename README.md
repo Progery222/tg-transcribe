@@ -128,6 +128,7 @@ server (`aiogram/telegram-bot-api`).
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | для self-hosted Bot API (получаются на my.telegram.org) |
 | `TELEGRAM_BOT_API_LOCAL_ROOT` | путь к shared volume внутри bot-контейнера |
 | `DM_SEND_DELAY_MS` | задержка между DM (анти-flood) |
+| `INGEST_ENABLED`, `INGEST_URL`, `INGEST_CHAT_IDS` | отправка файла ежедневного дайджеста POST'ом во внешний сервис (raw `text/plain`; только автоматический дайджест, `/digest_now` не шлёт) |
 | `DB_PATH`, `LOG_LEVEL`, `LOG_JSON` | runtime |
 
 ## Архитектура
