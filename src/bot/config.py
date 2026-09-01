@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str | None = None
     OPENAI_TIMEOUT: int = 120
 
     # Gemini

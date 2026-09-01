@@ -30,8 +30,14 @@ log = structlog.get_logger(__name__)
 class OpenAITranscriber:
     provider = "openai"
 
-    def __init__(self, api_key: str, *, timeout: float = 120.0) -> None:
-        self._client = AsyncOpenAI(api_key=api_key, timeout=timeout)
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        timeout: float = 120.0,
+        base_url: str | None = None,
+    ) -> None:
+        self._client = AsyncOpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
 
     async def transcribe(
         self,

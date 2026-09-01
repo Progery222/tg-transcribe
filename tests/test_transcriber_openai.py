@@ -27,6 +27,35 @@ def _make_transcriber(*, side_effects: list) -> OpenAITranscriber:
     return transcriber
 
 
+def test_custom_base_url_is_used_by_openai_client() -> None:
+    transcriber = OpenAITranscriber(
+        api_key="sk-test",
+        timeout=1.0,
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+    assert str(transcriber._client.base_url) == "https://openrouter.ai/api/v1/"
+
+
+def test_build_transcriber_passes_configured_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    import bot.main as main
+
+    monkeypatch.setattr(
+        main,
+        "settings",
+        SimpleNamespace(
+            OPENAI_API_KEY="sk-test",
+            OPENAI_TIMEOUT=1,
+            OPENAI_BASE_URL="https://openrouter.ai/api/v1",
+            GEMINI_API_KEY="",
+        ),
+    )
+
+    transcriber = main._build_transcribers()["openai"]
+
+    assert str(transcriber._client.base_url) == "https://openrouter.ai/api/v1/"
+
+
 async def test_success(audio_file: Path) -> None:
     t = _make_transcriber(side_effects=[SimpleNamespace(text="hello world", language="en")])
     result = await t.transcribe(audio_file, "audio/ogg", "v.ogg", model="whisper-1")

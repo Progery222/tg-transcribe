@@ -33,6 +33,7 @@ def _build_transcribers() -> dict[str, Transcriber]:
         out["openai"] = OpenAITranscriber(
             api_key=settings.OPENAI_API_KEY,
             timeout=settings.OPENAI_TIMEOUT,
+            base_url=settings.OPENAI_BASE_URL,
         )
     if settings.GEMINI_API_KEY:
         out["gemini"] = GeminiTranscriber(
