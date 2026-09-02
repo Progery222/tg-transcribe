@@ -186,61 +186,51 @@ uv run pytest -v
 
 ## Deployment
 
-Auto-deploy: push в `main` → GitHub Actions запускает `test` (ubuntu-latest) → `build-and-push` image в GHCR (ubuntu-latest) → `deploy` (self-hosted runner на VPS делает `docker compose pull && up -d` локально).
+Production сервиса управляется Coolify. Единственный штатный поток:
 
-### Архитектура
+```text
+feature-ветка -> Pull Request -> CI -> merge в main -> Coolify auto-deploy
+```
 
-VPS живёт в приватной сети (10.x), GitHub Actions cloud-runner не может ssh-иться напрямую. Поэтому на сервере крутится **self-hosted GitHub Actions runner** как systemd service — он сам поллит github.com по outbound HTTPS и выполняет деплой локально без SSH.
+Параметры production-ресурса:
 
-### Первичный setup VPS
+- Coolify project: `telegram-bots`
+- Coolify resource: `tg-transcribe`
+- Git repository: `Progery222/tg-transcribe`
+- branch: `main`
+- Compose file: `docker-compose.coolify.yml`
 
-1. **Self-hosted runner**: на github.com/Progery222/tg-transcribe → Settings → Actions → Runners → New self-hosted runner. На сервере:
-   ```bash
-   mkdir -p ~/actions-runner && cd ~/actions-runner
-   curl -sSL -o runner.tar.gz https://github.com/actions/runner/releases/download/v2.334.0/actions-runner-linux-x64-2.334.0.tar.gz
-   tar xzf runner.tar.gz && rm runner.tar.gz
-   ./config.sh --url https://github.com/Progery222/tg-transcribe --token <REGISTRATION_TOKEN> --name $(hostname) --labels self-hosted,Linux,X64 --unattended
-   sudo ./svc.sh install $USER
-   sudo ./svc.sh start
-   ```
-2. **Папка деплоя**: `mkdir -p ~/tg-transcribe && cd ~/tg-transcribe`
-3. Скопировать с ноутбука: `scp docker-compose.prod.yml atom-server:~/tg-transcribe/`
-4. Создать `~/tg-transcribe/.env` с реальными ключами (см. [.env.example](.env.example)), `chmod 600 .env`
-5. Для больших файлов (>20 МБ) добавить в `.env` `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_BOT_API_URL=http://telegram-bot-api:8081`/`TELEGRAM_BOT_API_LOCAL_ROOT=/var/lib/telegram-bot-api` и **разово** разлогинить бота:
-   ```bash
-   curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/logOut"
-   ```
-6. Первый запуск: `docker compose -f docker-compose.prod.yml --profile big-files pull && docker compose -f docker-compose.prod.yml --profile big-files up -d`
-7. `docker compose -f docker-compose.prod.yml logs -f bot` — должны быть `transcribers_loaded`, `scheduler_started`, `bot_started`, и при включённом профиле — `bot_api_local_mode`
+GitHub Actions выполняет `uv sync --frozen`, Ruff, Pytest, проверку Compose-файла и Docker-сборку без push. SSH-deploy, self-hosted runner и публикация GHCR не используются.
 
-### Подмена `.env` на сервере
+### Release
 
-`.env` не управляется CI. Чтобы ротировать ключ:
+Разработка ведётся в локальном контексте Orca `tg-transcribe — исходники` из `C:\Projects\Серваки\tg-transcribe`:
+
+1. Создайте feature-ветку от актуального `main`.
+2. Внесите изменение и выполните `uv run ruff check .`, `uv run pytest -v` и `docker build --tag tg-transcribe:ci-local .`.
+3. Создайте коммит, отправьте ветку в GitHub и откройте Pull Request.
+4. После успешных CI-проверок выполните merge в `main`.
+5. Проверьте один новый deployment в Coolify и логи ресурса `tg-transcribe`.
+
+Файлы не копируются вручную с локального ПК на сервер через `scp` или `rsync`.
+
+### Server diagnostics
+
+Серверный контекст Orca `tg-transcribe — сервер` используется для диагностики. Активный production определяется меткой Coolify:
 
 ```bash
-ssh atom-server
-nano ~/tg-transcribe/.env
-docker compose -f ~/tg-transcribe/docker-compose.prod.yml up -d
+docker ps --filter 'label=coolify.resourceName=tg-transcribe' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 ```
+
+До любой операции подтвердите, что контейнер принадлежит ресурсу Coolify `tg-transcribe`. Не запускайте отдельный Compose-проект из `/home/atom/tg-transcribe`: это может создать второй экземпляр бота.
+
+### Secrets and data
+
+`.env` хранится только в Coolify environment. Именованные volumes из `docker-compose.coolify.yml` сохраняются между обычными deployments. Никогда не используйте `docker compose down -v`.
 
 ### Rollback
 
-```bash
-ssh atom-server
-cd ~/tg-transcribe
-IMAGE_TAG=sha-<previous_full_sha> docker compose -f docker-compose.prod.yml up -d
-```
-
-Сброс: `unset IMAGE_TAG` (или `IMAGE_TAG=latest`) и повторно `up -d`.
-
-### Backup volume
-
-```bash
-docker run --rm -v bot_data:/data -v $PWD:/backup alpine \
-  tar czf /backup/bot-$(date +%F).tgz -C /data .
-```
-
-**⚠ Никогда не запускайте** `docker compose down -v` — флаг `-v` стирает named volume с SQLite (история транскрипций, подписчики, инвайты).
+Откат выполняется в Coolify через историю deployments: выберите последнюю рабочую ревизию и запустите redeploy. Не используйте `docker-compose.prod.yml` параллельно активному Coolify-ресурсу.
 
 ## Лицензия
 
