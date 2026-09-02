@@ -40,3 +40,6 @@ htmlcov/
 .vscode/
 *.swp
 *.swo
+
+# Local Git worktrees
+.worktrees/
