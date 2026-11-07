@@ -30,7 +30,8 @@ class Settings(BaseSettings):
 
     # Concurrency / limits
     MAX_CONCURRENT_TRANSCRIPTIONS: int = 3
-    MAX_FILE_BYTES: int = 500 * 1024 * 1024  # 500 MB with self-hosted Bot API
+    # 2000 MB — the download ceiling of the self-hosted Bot API (public API: 20 MB).
+    MAX_FILE_BYTES: int = 2000 * 1024 * 1024
     # getFile in local Bot API mode blocks until the server downloads the whole
     # file from Telegram's DC; the aiogram session default (60s) times out on
     # large forwarded videos. Give getFile/download_file a generous timeout.

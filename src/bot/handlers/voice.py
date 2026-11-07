@@ -6,6 +6,7 @@ from datetime import UTC
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import aiohttp
 import structlog
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType
@@ -53,7 +54,7 @@ def _display_name(user: User | None) -> str | None:
 
 
 @router.message(
-    (F.voice | F.video_note | F.audio | F.video)
+    (F.voice | F.video_note | F.audio | F.video | F.document)
     & F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP})
 )
 async def on_media(
@@ -138,8 +139,8 @@ async def on_media(
                 local_root=settings.TELEGRAM_BOT_API_LOCAL_ROOT,
                 fetch_timeout=settings.FILE_FETCH_TIMEOUT,
             )
-        except TelegramAPIError as e:
-            log.warning("download_failed", err=str(e), file_id=file_id)
+        except (TelegramAPIError, aiohttp.ClientError, TimeoutError) as e:
+            log.warning("download_failed", err=str(e) or type(e).__name__, file_id=file_id)
             await notify_super_admins(
                 bot,
                 t("transcript_failed_admin", chat_title=chat_title, error=f"download: {e}"),

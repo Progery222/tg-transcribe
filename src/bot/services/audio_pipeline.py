@@ -86,7 +86,7 @@ async def prepare_payload(
     work_dir: Path | None = None,
 ) -> AudioPayload:
     """Convert any downloaded Telegram media into a uniform Opus payload."""
-    if content_type not in ("voice", "audio", "video_note", "video"):
+    if content_type not in ("voice", "audio", "video_note", "video", "document"):
         raise ValueError(f"unsupported content type: {content_type}")
     out_path = await normalize_to_opus(src_path, work_dir=work_dir)
     return AudioPayload(path=out_path, mime="audio/ogg", filename=f"{content_type}.ogg")

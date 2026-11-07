@@ -109,3 +109,10 @@ async def test_video_extracts_to_opus(sample_mp4: Path, tmp_path: Path) -> None:
     assert payload.path.stat().st_size > 0
     # OGG container begins with the "OggS" capture pattern.
     assert payload.path.read_bytes()[:4] == b"OggS"
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg not installed")
+async def test_document_video_extracts_to_opus(sample_mp4: Path, tmp_path: Path) -> None:
+    payload = await prepare_payload("document", sample_mp4, "video/mp4", work_dir=tmp_path)
+    assert payload.mime == "audio/ogg"
+    assert payload.path.read_bytes()[:4] == b"OggS"
