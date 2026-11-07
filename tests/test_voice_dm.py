@@ -242,3 +242,41 @@ async def test_voice_disabled_chat_skipped(monkeypatch: pytest.MonkeyPatch) -> N
         },
     )
     fake_dm.assert_not_awaited()
+
+
+async def test_voice_raw_network_error_logged_as_download_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import aiohttp
+
+    from bot.db.database import get_db
+
+    monkeypatch.setattr(
+        voice,
+        "fetch_file_path",
+        AsyncMock(side_effect=aiohttp.ServerDisconnectedError()),
+    )
+    notify = AsyncMock()
+    monkeypatch.setattr(voice, "notify_super_admins", notify)
+    fake_dm = AsyncMock()
+    monkeypatch.setattr(voice, "send_transcript_dm", fake_dm)
+
+    await voice.on_media(
+        _msg(),
+        SimpleNamespace(),
+        chat_settings=_cs(),
+        transcribers={
+            "openai": _FakeTranscriber(
+                TranscriptionResult(
+                    text="x", model="x", provider="openai", duration_ms=1, language=None
+                )
+            )
+        },
+    )
+
+    conn = await get_db()
+    async with conn.execute("SELECT success, error_code FROM transcriptions") as cur:
+        rows = await cur.fetchall()
+    assert [tuple(r) for r in rows] == [(0, "download_failed")]
+    notify.assert_awaited_once()
+    fake_dm.assert_not_awaited()

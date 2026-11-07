@@ -37,7 +37,11 @@ class OpenAITranscriber:
         timeout: float = 120.0,
         base_url: str | None = None,
     ) -> None:
-        self._client = AsyncOpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
+        # max_retries=0: transcribe() already retries via tenacity; SDK retries on top
+        # turned one hung request into up to 9 x timeout.
+        self._client = AsyncOpenAI(
+            api_key=api_key, timeout=timeout, base_url=base_url, max_retries=0
+        )
 
     async def transcribe(
         self,
